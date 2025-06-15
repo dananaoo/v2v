@@ -1,11 +1,10 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 import google.generativeai as genai
 import json
 import os
-from dotenv import load_dotenv
-from fastapi import UploadFile
 import requests
+from dotenv import load_dotenv
 
 load_dotenv()
 
@@ -21,8 +20,12 @@ app.add_middleware(
 
 # ✅ Configure Gemini properly
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+
 if not GOOGLE_API_KEY:
     raise ValueError("GOOGLE_API_KEY not found in environment variables")
+if not OPENAI_API_KEY:
+    raise ValueError("OPENAI_API_KEY not found in environment variables")
 
 genai.configure(api_key=GOOGLE_API_KEY)
 model = genai.GenerativeModel("gemini-1.5-flash")
@@ -56,6 +59,7 @@ async def websocket_endpoint(websocket: WebSocket):
                 try:
                     response = model.generate_content(user_message)
                     ai_response = response.text
+                    print("Gemini response:", ai_response)
                 except Exception as e:
                     print("Gemini error:", e)
                     ai_response = "Sorry, Gemini failed."
@@ -73,23 +77,28 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-
 @app.post("/transcribe/")
 async def transcribe_audio(audio: UploadFile):
     audio_data = await audio.read()
 
-    response = requests.post(
-        "https://api.openai.com/v1/audio/transcriptions",
-        headers={
-            "Authorization": f"Bearer {OPENAI_API_KEY}"
-        },
-        files={
-            "file": (audio.filename, audio_data, audio.content_type),
-            "model": (None, "whisper-1")
-        }
-    )
+    try:
+        response = requests.post(
+            "https://api.openai.com/v1/audio/transcriptions",
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}"
+            },
+            files={
+                "file": ("recording.webm", audio_data, "audio/webm"),
+                "model": (None, "whisper-1")
+            }
+        )
 
-    result = response.json()
-    return {"transcription": result.get("text", "")}
+        print("Whisper status code:", response.status_code)
+        print("Whisper response:", response.json())
+
+        result = response.json()
+        return {"transcription": result.get("text", "")}
+
+    except Exception as e:
+        print("Transcription error:", e)
+        return {"transcription": ""}

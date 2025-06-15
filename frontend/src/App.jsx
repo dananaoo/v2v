@@ -10,35 +10,47 @@ function App() {
   const audioChunks = useRef([])
 
   useEffect(() => {
-    // Initialize WebSocket connection
-    ws.current = new WebSocket(`ws://${window.location.hostname}:8000/ws`)
-
-
-    ws.current.onopen = () => {
-      setIsConnected(true)
-      console.log('Connected to WebSocket')
-    }
-
-    ws.current.onmessage = (event) => {
-      const data = JSON.parse(event.data)
-      if (data.type === 'ai_response') {
-        setMessages(prev => [...prev, { type: 'ai', text: data.message }])
-        // Here you would typically convert text to speech
-        speakText(data.message)
+    const connectWebSocket = () => {
+      ws.current = new WebSocket(`ws://${window.location.hostname}:8000/ws`)
+  
+      ws.current.onopen = () => {
+        setIsConnected(true)
+        console.log('Connected to WebSocket')
+      }
+  
+      ws.current.onmessage = (event) => {
+        const data = JSON.parse(event.data)
+        if (data.type === 'ai_response') {
+          setMessages(prev => [...prev, { type: 'ai', text: data.message }])
+          speakText(data.message)
+        }
+      }
+  
+      ws.current.onclose = () => {
+        setIsConnected(false)
+        console.log('Disconnected from WebSocket')
+  
+        // 🔁 Try reconnecting every 2 seconds
+        setTimeout(() => {
+          connectWebSocket()
+        }, 2000)
+      }
+  
+      ws.current.onerror = (err) => {
+        console.error('WebSocket error:', err)
+        ws.current.close() // force reconnect through onclose
       }
     }
-
-    ws.current.onclose = () => {
-      setIsConnected(false)
-      console.log('Disconnected from WebSocket')
-    }
-
+  
+    connectWebSocket()
+  
     return () => {
       if (ws.current) {
         ws.current.close()
       }
     }
   }, [])
+  
 
   const startRecording = async () => {
     try {
@@ -51,26 +63,31 @@ function App() {
       }
 
       mediaRecorder.current.onstop = async () => {
-        const audioBlob = new Blob(audioChunks.current, { type: 'audio/wav' })
+        const audioBlob = new Blob(audioChunks.current, { type: 'audio/webm' })
         const formData = new FormData()
-        formData.append('audio', audioBlob, 'recording.wav')
+        formData.append('audio', audioBlob, 'recording.webm')  // Only once, with correct order + type
       
-        const response = await fetch('http://127.0.0.1:8000/transcribe/', {
-          method: 'POST',
-          body: formData
-        })
+        try {
+          const response = await fetch('http://127.0.0.1:8000/transcribe/', {
+            method: 'POST',
+            body: formData
+          })
       
-        const data = await response.json()
-        const transcription = data.transcription || "Sorry, could not transcribe."
+          const data = await response.json()
+          const transcription = data.transcription || "Sorry, could not transcribe."
       
-        setMessages(prev => [...prev, { type: 'user', text: transcription }])
+          setMessages(prev => [...prev, { type: 'user', text: transcription }])
       
-        if (ws.current && ws.current.readyState === WebSocket.OPEN) {
-          ws.current.send(JSON.stringify({
-            message: transcription
-          }))
+          if (ws.current && ws.current.readyState === WebSocket.OPEN) {
+            ws.current.send(JSON.stringify({
+              message: transcription
+            }))
+          }
+        } catch (err) {
+          console.error("Transcription error:", err)
         }
       }
+      
       
 
       mediaRecorder.current.start()
